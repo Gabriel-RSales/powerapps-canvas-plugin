@@ -10,7 +10,7 @@ ciclo.
 ## Instalar
 
 ```
-/plugin marketplace add <seu-usuario>/powerapps-canvas-plugin
+/plugin marketplace add Gabriel-RSales/powerapps-canvas-plugin
 /plugin install powerapps-canvas@powerapps-canvas
 ```
 
