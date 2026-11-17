@@ -1,0 +1,315 @@
+# Gotchas de Power Apps Canvas / Dataverse — base de conhecimento EXECUTAVEL.
+#
+# Cada entrada e uma armadilha que ja custou tempo real. As que tem `rule:` viram
+# lint automatico no scripts/validate.py; as outras servem de leitura obrigatoria.
+#
+# COMO USAR: quando o Studio recusar algo, procure aqui ANTES de depurar.
+# COMO CRESCER: `python scripts/gotcha.py add` (ver SKILL.md, secao "Alimentar a skill").
+#
+# Campos:
+#   id        slug unico (vira o nome da regra no validate.py)
+#   title     uma linha, o que esta errado
+#   severity  error | warning
+#   symptom   a mensagem EXATA do Studio/runtime (e por ela que se procura)
+#   fix       o conserto
+#   why       a causa raiz, quando foi apurada
+#   verified  data em que foi comprovado no Studio (nao em documentacao)
+#   rule      opcional: {property, contains|regex} ou {regex} para varrer o arquivo
+
+- id: yaml-escalar-com-dois-pontos
+  title: 'Escalar YAML nao-quotado contendo ": " quebra o import'
+  severity: error
+  symptom: 'mapping values are not allowed here'
+  fix: >-
+    Ponha a formula em bloco "|-", OU tire o espaco depois do ":" em record inline
+    ({chave:valor}, nao {chave: valor}). Em bloco "|-" o espaco e permitido.
+  why: >-
+    O YAML interpreta ": " como separador de mapa. Pegou duas vezes no mesmo dia:
+    `Text: ="Fechamentos por medico: um por competencia"` e
+    `DefaultSelectedItems: =Table({Value: Text(Year(Today()))})`.
+  verified: 2026-11-10
+
+- id: yaml-cerquilha-comentario
+  title: '"#" em formula fora de bloco "|-" e cortado no import'
+  severity: error
+  symptom: 'A mascara de moeda/numero some e o Text() exibe o valor cru'
+  fix: >-
+    Toda formula com "#" (ex. "$ #,##0.00") vai em bloco "|-" ou entre aspas.
+  why: 'Em escalar nao-quotado, " #" inicia comentario YAML e o resto da linha evapora.'
+  verified: 2026-07-06
+
+- id: itemdisplaytext-isblank
+  title: 'ItemDisplayText do ModernCombobox nao aceita IsBlank'
+  severity: error
+  symptom: 'The IsBlank function cannot be used in expressions on this property.'
+  fix: 'Troque IsBlank(x) por x = "" (texto) ou x > 0 (numero). If() e Text() funcionam.'
+  why: >-
+    A restricao e do IsBlank, nao de "funcao" em geral — leitura anterior
+    generalizou de um caso so e estava errada. Comprovado no export do Studio:
+    ItemDisplayText com If(...) + Text(..., "#0.0##", "pt-BR") passa.
+  verified: 2026-10-20
+  rule:
+    property: ItemDisplayText
+    contains: 'IsBlank('
+
+- id: combobox-choice-items
+  title: 'Items = Choices([@tabela].coluna) nao funciona em coluna choice'
+  severity: error
+  symptom: 'O combobox abre vazio ou o Patch grava Blank'
+  fix: >-
+    Use ForAll(Choices(<nome_do_optionset>), {LogicalName: ThisRecord.Value,
+    Value: BadgesChoiceName(Text(ThisRecord.Value))}), ItemDisplayText =
+    ThisItem.Value e Patch com Self.Selected.LogicalName.
+  why: >-
+    Choices() devolve tabela de UMA coluna "Value" com o valor de choice; o
+    combobox precisa de coluna de TEXTO para exibir. A projecao separa as duas
+    responsabilidades. Choices() recebe o nome do OPTIONSET, nao tabela.coluna.
+  verified: 2026-09-09
+  rule:
+    regex: 'Choices\(\s*\[@'
+
+- id: autolayout-minsize
+  title: 'Container AutoLayout sem LayoutMinHeight/Width ignora o tamanho automatico'
+  severity: warning
+  symptom: >-
+    O container colapsa (altura/largura ~0) ou nao respeita o tamanho dos filhos,
+    mesmo com LayoutDirection e FillPortions corretos.
+  fix: >-
+    Defina um valor PEQUENO e explicito — LayoutMinHeight: =10 em container
+    vertical, LayoutMinWidth: =10 em horizontal. Nao deixe omitido nem 0.
+    Valor maior (ex. 200) so quando a coluna tem largura minima real de layout.
+  why: >-
+    Comportamento observado em centenas de containers: com a propriedade ausente
+    o runtime nao recalcula o tamanho a partir dos filhos. Um minimo pequeno
+    "destrava" o calculo sem impor tamanho. NAO confunda com a leitura antiga
+    "LayoutMin* quebra AutoLayout, use 0 ou omita" — e o contrario no uso real
+    (165 ocorrencias de LayoutMinHeight: =10 no app de referencia).
+  verified: 2026-11-17
+
+- id: coalesce-string-vazia
+  title: 'Coalesce(x, "") devolve Blank, nao ""'
+  severity: error
+  symptom: 'JSON() serializa null e o Parse_JSON do fluxo reprova o payload'
+  fix: 'Use `x & ""` para garantir string.'
+  why: 'O Coalesce do Power Fx ignora blank E string vazia, entao devolve Blank().'
+  verified: 2026-09-09
+  rule:
+    regex: 'Coalesce\([^()]*,\s*""\s*\)'
+
+- id: bit-nao-e-boolean
+  title: 'Coluna bit (Sim/Nao) em contexto boolean de PROPRIEDADE derruba o render'
+  severity: error
+  symptom: '"This app ran into a problem" / Contract failure checkNumberOrNull'
+  fix: >-
+    Use OptionSetBIT_Parse(x.bit) (UDF propria) em Color/Fill/Text/Visible.
+    Em condicao de Filter o bit cru funciona e delega — mantenha.
+  verified: 2026-07-06
+
+- id: udf-decimal
+  title: 'UDF com tipo de retorno :Decimal nao compila'
+  severity: error
+  symptom: 'Erro no Studio ao salvar a UDF'
+  fix: 'Use :Number. UDF numerica SEMPRE retorna Number.'
+  verified: 2026-07-06
+  rule:
+    regex: '\)\s*:\s*Decimal\s*='
+
+- id: udf-argumento-sempre-avaliado
+  title: 'Nao existe UDF lazy: todo argumento e avaliado antes da chamada'
+  severity: error
+  symptom: >-
+    UDF "de fallback" nao economiza nada e ainda executa o caminho caro; em caso
+    extremo calcula valores que deveriam ser ignorados.
+  fix: >-
+    Para lazy, use If() no proprio Default do controle, ou uma UDF de PREDICADO
+    (recebe escalar ja calculado e so decide). Nao passe a "alternativa cara"
+    como argumento.
+  verified: 2026-09-08
+
+- id: database-indireto-nao-delega
+  title: 'Fonte indireta (record de named formula) NAO delega'
+  severity: error
+  symptom: >-
+    Filter/LookUp so enxerga as primeiras 500 linhas; LookUp por chave devolve
+    Blank para registro fora da janela (falha SILENCIOSA -> duplicata).
+  fix: >-
+    Use alias PLANO por tabela (ex. `PacientesData = pacientes;` em App.Formulas)
+    e nunca `DataBase.Pacientes.data`. O alias plano e expandido inline pelo
+    compilador e preserva a delegacao.
+  why: >-
+    O Power Fx nao rastreia a datasource atraves do acesso a campo de um record;
+    trata a fonte como colecao em memoria. Sintoma que revelou: com 13k pacientes
+    o combobox nao achava ninguem.
+  verified: 2026-08-31
+  rule:
+    regex: '\bDataBase\.\w+\.data\b'
+
+- id: remove-exige-datasource-direta
+  title: 'Remove() nao aceita o alias — exige a datasource direta'
+  severity: error
+  symptom: 'Erro de tipo no Studio em Remove(TabelaData, ThisItem)'
+  fix: 'Remove(nome_real_da_tabela, ThisItem). E a UNICA excecao a regra do alias.'
+  why: 'Patch, Defaults, Refresh e Collect aceitam o alias normalmente.'
+  verified: 2026-09-02
+
+- id: forall-escreve-na-propria-fonte
+  title: 'ForAll nao pode escrever na datasource que ele itera'
+  severity: error
+  symptom: 'This function cannot operate on the same data source that is used in ForAll'
+  fix: >-
+    With({_Origem: Filter(XData, ...)}, ForAll(_Origem As Alias, Patch(XData, ...))).
+    NAO troque por ClearCollect quando o Patch recebe o proprio record iterado.
+  why: >-
+    Com fonte indireta o compilador nao reconhecia as duas pontas como a mesma
+    datasource; o alias plano restaurou a identidade e a checagem passou a valer.
+  verified: 2026-08-31
+
+- id: blank-em-ctx-vira-record-vazio
+  title: 'Blank() em variavel de contexto de TEXTO vira {} e quebra IsBlank'
+  severity: error
+  symptom: 'IsBlank(ctxTexto) da false quando deveria dar true; binding de texto quebra'
+  fix: 'Inicialize variavel de contexto de texto com "" e nao com Blank().'
+  verified: 2026-07-06
+
+- id: altura-pai-x-filhos
+  title: 'Pai que calcula Height a partir dos filhos + filho esticado = loop infinito'
+  severity: error
+  symptom: 'A tela cresce sozinha, ganhando o LayoutGap a cada frame'
+  fix: 'Filhos com Height proprio (fixo/formula) OU pai com Height fixo. Nunca os dois automaticos.'
+  verified: 2026-07-06
+
+- id: updatecontext-var-no-mesmo-bloco
+  title: 'UpdateContext nao enxerga variavel definida no MESMO UpdateContext'
+  severity: error
+  symptom: 'A segunda variavel recebe Blank em vez do valor da primeira'
+  fix: 'Divida em dois UpdateContext separados por ";".'
+  verified: 2026-07-06
+
+- id: coluna-file-bindavel
+  title: 'Coluna file do Dataverse e bindavel direto, apesar do metadata read-only'
+  severity: warning
+  symptom: >-
+    O metadata marca ValidForCreateApi: 0 e o Studio mostra read-only — ignore.
+    Se embrulhar em JSON(..., JSONFormat.IncludeBinaryData) grava 55 bytes de
+    lixo que renderizam na sessao e somem no reload ("as vezes carrega").
+  fix: >-
+    Grave com Patch passando o record {FileName: ..., Value: ...} e leia com
+    .Value direto na propriedade Image.
+  verified: 2026-08-25
+  rule:
+    regex: 'JSONFormat\.IncludeBinaryData'
+
+- id: char10-em-controle-linha-unica
+  title: 'Char(10) em content control de linha unica CORROMPE o .docx'
+  severity: error
+  symptom: 'Word: "experienced an error trying to open the file" (ZIP e XML validos)'
+  fix: >-
+    So mande quebra para controle com "Permitir retornos de carro" (w:multiLine="1").
+    Diagnostico: abrir o .docx como zip e varrer word/document.xml por code point < 32.
+  verified: 2026-08-22
+
+- id: array-vazio-em-repeating-word
+  title: 'Array vazio em repeating section corrompe o .docx'
+  severity: error
+  symptom: '"Arquivo corrompido" com XML bem-formado'
+  fix: 'Mande sempre ao menos uma linha neutra ("Nao se aplica") quando a lista estiver vazia.'
+  why: 'O conector apaga o item do repeating e a w:tc fica sem nenhum w:p — ilegal em OOXML.'
+  verified: 2026-08-22
+
+- id: dynamicfileschema-aspas-no-array
+  title: 'No dynamicFileSchema do conector Word, texto vai COM aspas e array SEM'
+  severity: error
+  symptom: 'A tabela do documento sai com o JSON cru [{"Item":...}] dentro da primeira celula'
+  fix: >-
+    Ao colar no designer: "1001": "@{body('Parse_JSON')?['Campo']}" (texto) e
+    "1007": @{body('Parse_JSON')?['Itens']} (array, sem aspas).
+  why: >-
+    Todos usam @{} — e o que faz o designer converter em expressao ao colar — mas
+    as aspas decidem o TIPO. O fluxo exportado mostra outro formato; nao copie do
+    export para o designer.
+  verified: 2026-10-23
+
+- id: chave-fora-do-schema-e-ignorada
+  title: 'Chave que o app manda e nao esta no Parse_JSON e ignorada em SILENCIO'
+  severity: warning
+  symptom: 'O campo sai vazio no documento, sem erro e sem rastro no historico do fluxo'
+  fix: 'Alterar payload e schema do Parse_JSON SEMPRE juntos; conferir por diff, nao de olho.'
+  verified: 2026-08-22
+
+- id: medico-duplicado-casar-por-nome
+  title: 'Entidade duplicada por dimensao: casar por PK devolve Blank em silencio'
+  severity: warning
+  symptom: >-
+    LookUp por id_x.pk devolve Blank e o campo cai no fallback sem avisar, porque
+    a linha certa e outra da mesma pessoa/coisa.
+  fix: >-
+    Enquanto a duplicacao existir, case pela chave de NEGOCIO (nome) e use
+    Distinct() nos comboboxes. So troque para PK DEPOIS de consolidar o modelo.
+  why: 'Modelagem em que a mesma pessoa tem uma linha por grupo/dimensao.'
+  verified: 2026-09-09
+
+- id: isblank-em-tabela
+  title: 'IsBlank(tabela) e sempre false'
+  severity: error
+  symptom: 'A validacao de "lista vazia" nunca dispara'
+  fix: 'Use IsEmpty(tabela). CountRows(...)=0 funciona mas e redundante.'
+  verified: 2026-09-08
+
+- id: pa2231-evento-sem-default
+  title: 'Propriedade de entrada do tipo Event exige Default nao-vazio'
+  severity: error
+  symptom: "PA2231: Custom input property of kind 'Event' requires a non-empty 'Default' formula."
+  fix: 'Default: =false (formula que nao faz nada) ou uma acao real.'
+  why: >-
+    O arquivo pode ter sido exportado assim pelo proprio Studio no passado; quem
+    mudou foi a validacao do import. Aparece ao reler o app inteiro do repo.
+  verified: 2026-10-26
+
+- id: pa2108-radius-em-label
+  title: 'Label classico nao tem Radius*/cantos arredondados'
+  severity: error
+  symptom: "PA2108: propriedade 'RadiusTopLeft' nao existe neste controle"
+  fix: >-
+    Para "texto com fundo arredondado", use Classic/Button em DisplayMode.View e
+    declare TANTO Fill/Color quanto DisabledFill/DisabledColor (em View o runtime
+    pinta pelas Disabled*).
+  verified: 2026-09-09
+
+- id: pa2108-propriedade-de-componente
+  title: 'Propriedade que nao existe na definicao do componente da PA2108'
+  severity: error
+  symptom: "PA2108: 'Titulo' nao e propriedade de cmpAppTopbar"
+  fix: 'Confira CustomProperties na definicao do componente antes de setar.'
+  verified: 2026-09-09
+
+- id: data-datetime-comparacao-fim
+  title: 'Coluna datetime com `<= fim` corta o ultimo dia'
+  severity: warning
+  symptom: 'Registro do ultimo dia do periodo some do filtro quando tem hora gravada'
+  fix: 'Use `< DateAdd(fim, 1, TimeUnit.Days)`.'
+  verified: 2026-11-10
+
+- id: delegacao-funcoes
+  title: 'Distinct/Sort/in/Search nunca delegam; StartsWith delega'
+  severity: warning
+  symptom: 'Aviso de delegacao (com falso positivo nas duas direcoes) e resultado truncado em 500'
+  fix: >-
+    Em tabela grande: StartsWith no lugar de in/Search; escolher o campo pelo
+    formato do termo em vez de Or de dois StartsWith; Trim() no termo, nunca na
+    coluna. Validar com registro sabidamente fora das primeiras 500 linhas.
+  why: 'IsFilterable: 0 no YML do atributo e ruido do exportador — nao serve de diagnostico.'
+  verified: 2026-08-31
+
+- id: export-desatualizado-vs-ambiente
+  title: O export no repo pode estar atrasado em relacao ao ambiente
+  severity: warning
+  symptom: >-
+    O espelho do schema mostra menos opcoes/colunas do que o app realmente usa
+    (ex.: optionset com 12 opcoes enquanto o Canvas referencia uma 13a)
+  fix: >-
+    Antes de confiar no espelho, rode pac solution export + unpack de novo. Se a
+    divergencia persistir, o ambiente tem a verdade: o yml do repo e um retrato.
+  why: >-
+    Achado ao gerar o espelho deste projeto: d2_categoria_item exportado com 12
+    opcoes, mas o app grava aluguel_quantum.
+  verified: 2026-11-17

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "powerapps-canvas",
+  "description": "Ferramental de desenvolvimento para Power Apps Canvas e Power Platform.",
+  "owner": {
+    "name": "Gabriel Reis"
+  },
+  "plugins": [
+    {
+      "name": "powerapps-canvas",
+      "description": "Desenvolver, revisar e validar apps Power Apps Canvas (.pa.yaml) com Dataverse ou SharePoint: validador offline, base de gotchas executavel, espelho do schema e padroes de nomenclatura, code review e ALM.",
+      "source": "./plugins/powerapps-canvas",
+      "category": "development",
+      "author": {
+        "name": "Gabriel Reis",
+        "email": "ga.willian.sales@outlook.com"
+      }
+    }
+  ]
+}

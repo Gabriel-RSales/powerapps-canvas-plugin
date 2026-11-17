@@ -1,0 +1,19 @@
+{
+  "name": "powerapps-canvas",
+  "version": "1.0.0",
+  "description": "Desenvolver, revisar e validar apps Power Apps Canvas (.pa.yaml) com Dataverse ou SharePoint: validador offline de YAML/Power Fx, base de gotchas executavel, espelho do schema e padroes de nomenclatura, code review e ALM.",
+  "author": {
+    "name": "Gabriel Reis",
+    "email": "ga.willian.sales@outlook.com"
+  },
+  "keywords": [
+    "power-apps",
+    "power-platform",
+    "canvas-app",
+    "dataverse",
+    "power-fx",
+    "sharepoint",
+    "low-code",
+    "alm"
+  ]
+}
